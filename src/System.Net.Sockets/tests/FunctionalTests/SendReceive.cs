@@ -1124,6 +1124,81 @@ namespace System.Net.Sockets.Tests
                 }
             }
         }
+
+        [Fact]
+        [PlatformSpecific(TestPlatforms.Windows)]
+        public void SendReceive_MultipleSegments_AroundStackallocBoundary()
+        {
+            // threshold is 16 currently; we'll test 1-25
+            var rand = new Random(12314);
+            List<ArraySegment<byte>> allSegments = new List<ArraySegment<byte>>(25);
+            for (int i = 0; i < 25; i++)
+            {
+                // not worrying about efficiency here!
+                int offset = rand.Next(2);
+                var len = rand.Next(5, 10);
+                var arr = new byte[offset + len + 2];
+                allSegments.Add(new ArraySegment<byte>(arr, offset, len));
+            }
+            List<ArraySegment<byte>> testSegments = new List<ArraySegment<byte>>(allSegments.Count);
+
+            int totalLen = allSegments.Sum(x => x.Count);
+            byte[] allSent = new byte[totalLen], allReceived = new byte[totalLen];
+
+            var pair = SelectTest.CreateConnectedSockets();
+            using (var client = pair.Key)
+            using (var server = pair.Value)
+            {
+                for(int testCount = 1; testCount <= allSegments.Count; testCount++)
+                {
+                    // fill testCount-many segments with data and send them
+                    testSegments.Clear();
+                    int offset = 0, bytesRemaining, totalBytesSent;
+                    for (int i = 0; i < testCount; i++)
+                    {
+                        var segment = allSegments[i];
+                        rand.NextBytes(segment.AsSpan());
+                        Buffer.BlockCopy(segment.Array, segment.Offset, allSent, offset, segment.Count);
+                        offset += segment.Count;
+                        testSegments.Add(segment);
+                    }
+
+                    // send the data
+                    client.Send(testSegments);
+                    totalBytesSent = bytesRemaining = offset;
+
+                    // read the data out, in as many reads as we need (might not be 1), using the same segments
+                    offset = 0;
+                    while (bytesRemaining > 0)
+                    {
+                        // wipe all before each receive
+                        foreach (var segment in testSegments)
+                            Array.Clear(segment.Array, segment.Offset, segment.Count);
+
+                        // try to fetch some data
+                        int bytesRead = server.Receive(testSegments);
+                        Assert.True(bytesRead > 0); // should get *something*
+                        bytesRemaining -= bytesRead;
+
+                        int segmentIndex = 0;
+                        while (bytesRead > 0)
+                        {
+                            var segment = testSegments[segmentIndex++];
+                            var consume = Math.Min(segment.Count, bytesRead);
+                            Buffer.BlockCopy(segment.Array, segment.Offset, allReceived, offset, consume);
+                            offset += consume;
+                            bytesRead -= consume;
+                        }
+                    }
+
+                    // check the data is what we originally sent
+                    for(int i = 0; i < totalBytesSent; i++)
+                    {
+                        Assert.Equal(allSent[i], allReceived[i]);
+                    }
+                }
+            }
+        }
     }
 
     public sealed class SendReceiveUdpClient : MemberDatas

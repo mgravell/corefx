@@ -211,7 +211,7 @@ namespace System.Net.Sockets.Tests
             }
         }
 
-        private static KeyValuePair<Socket, Socket> CreateConnectedSockets()
+        internal static KeyValuePair<Socket, Socket> CreateConnectedSockets()
         {
             using (Socket listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
             {
@@ -298,6 +298,53 @@ namespace System.Net.Sockets.Tests
                             return;
                         }
                     }
+                }
+            }
+        }
+
+        [Fact]
+        [PlatformSpecific(TestPlatforms.Windows)]
+        public void Select_AroundStackallocBoundary()
+        {
+            // current threshold is 64; we'll test 1-70
+            var allSockets = new List<Socket>();
+            try
+            {
+                byte[] dummy = { 0, 1, 2 };
+                for (int i = 0; i < 35 / 2; i++)
+                {
+                    var pair = CreateConnectedSockets();
+                    pair.Key.Send(dummy); // push 3 bytes from client to server
+                    allSockets.Add(pair.Key);
+                    allSockets.Add(pair.Value);
+                }
+
+                var testSockets = new List<Socket>(allSockets.Count);
+                for (int i = 1; i <= allSockets.Count; i++)
+                {
+                    testSockets.Clear();
+                    foreach(var item in allSockets.Take(i))
+                    {
+                        testSockets.Add(item);
+                    }
+                    Assert.Equal(i, testSockets.Count); // check we have the expected amount in the list
+
+                    Socket.Select(testSockets, null, null, 0);
+                    Assert.Equal(i / 2, testSockets.Count); // we expect only have to have data available in half the sockets
+
+                    // and check it is the *right* ones
+                    for(int j = 0; j < testSockets.Count; j++)
+                    {
+                        Assert.True(ReferenceEquals(testSockets[j], allSockets[(j * 2) + 1]));
+                    }
+                }
+            }
+            finally
+            {
+                foreach (var socket in allSockets)
+                {   // clean up
+                    try { socket.Dispose(); }
+                    catch { }
                 }
             }
         }
