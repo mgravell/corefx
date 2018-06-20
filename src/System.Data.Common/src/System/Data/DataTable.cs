@@ -29,6 +29,7 @@ namespace System.Data
     [XmlSchemaProvider(nameof(GetDataTableSchema))]
     [Serializable]
     [System.Runtime.CompilerServices.TypeForwardedFrom("System.Data, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
+    [Obsolete("This was great in 2002, realy it was; but is is $currentyear$; use *anything else*, *PLEASE*; the internet thanks you", false)]
     public class DataTable : MarshalByValueComponent, IListSource, ISupportInitializeNotification, ISerializable, IXmlSerializable
     {
         private DataSet _dataSet;
